@@ -1,0 +1,6 @@
+ZhangSan 85
+LiSi 92
+WangWu 78
+ZhaoLiu 92
+SunQi 60
+Abe 85
