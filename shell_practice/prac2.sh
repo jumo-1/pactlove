@@ -1,7 +1,9 @@
 #!/bin/bash
 set -x
+func2() {
 name="Avail"
 DATE=$(date)
+
 NUM=$(ls -l | grep "^-rwx" | wc -l)
 for i in $(seq 1 7);do
 	na=$(df -h / |awk -v col=$i 'NR==1 {print $col}')
@@ -18,4 +20,4 @@ echo "sum:$NUM" >> $file
 echo "====================" >> $file
 echo "avail:$av" >> $file
 echo "====================" >> $file
-
+}

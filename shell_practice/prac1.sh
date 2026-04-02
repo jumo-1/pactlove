@@ -1,6 +1,9 @@
 #!/bin/bash
 set -x
+lo=1
 SEQ=$(seq 1 10)
+
+func1() {
 #for i in $SEQ;do
 #	touch  test_$i.txt
 #done
@@ -31,3 +34,4 @@ for file in test_*.txt.bak.bak;do
         num=${temp%%.*}
         mv $file test_$num.txt 
 done
+}
