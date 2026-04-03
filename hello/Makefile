@@ -4,10 +4,10 @@ TAR=hhh
 DO= gcc
 
 $(TAR): $(PRO)
-	$(DO) $(PRO) -o $(TAR)
+	$(DO) -g $(PRO) -o $(TAR)
 
 %.o: %.c
-	$(DO) -c $< -o $@
+	$(DO) -g -c $< -o $@
 
 clean:
 	rm -i $(TAR) $(PRO)
