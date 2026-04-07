@@ -12,6 +12,6 @@ $(TARGET): $(PRO)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -rf $(PRO) $(TARGET)
+	rm -rf $(PRO) $(TARGET) $(DEPS)
 -include $(DEPS)
 

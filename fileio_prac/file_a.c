@@ -5,18 +5,30 @@
 #include<stdio.h>
 #include<string.h>
 int main(){
-	int file;
+	int file,file1,file2;
+	struct stat st;
 	if((file=open("afile.txt",O_RDWR|O_CREAT,0644))==-1){
 		printf("文件创建失/打开败");
 		return 0;
 	}
+	fstat(file,&st);
+
+	file1=open("afile.txt",O_RDONLY,0644);
+	file2=open("afile.txt",O_RDONLY,0644);
+
+	fstat(file1,&st);
+	fstat(file2,&st);
 	char *wr="Hello world~";
 
 	if(write(file,wr,strlen(wr))!=strlen(wr)){
 		perror("message");
 	}
+	fsync(file);
+	char rd1[20];
 	lseek(file,0,SEEK_SET);
+	ssize_t r1=read(file,rd1,20);
 	char rd[3];
+	lseek(file,0,SEEK_SET);
 	ssize_t r;
 
 	while((r=read(file,rd,3))!=0&&r!=-1){
@@ -30,6 +42,7 @@ int main(){
 		}
 	}
 
+	fstat(file,&st);
 	if(r==0){
 		printf("\nEnd\n");
 	}
@@ -39,6 +52,9 @@ int main(){
 	if(close(file)==-1){
 		perror("message");
 	}
+	close(file);
+	close(file1);
+	close(file2);
 	return 0;
 
 
