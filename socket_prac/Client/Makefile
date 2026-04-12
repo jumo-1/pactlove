@@ -1,5 +1,5 @@
 FILE=$(wildcard *.c)
-TARGET=file_b
+TARGET=client
 CC=gcc
 
 PRO=$(FILE:%.c=%.o)
