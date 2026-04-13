@@ -11,6 +11,15 @@
 #include<arpa/inet.h>
 #include <sys/epoll.h>
 #include <errno.h>  
+#pragma pack(1)
+struct Myprotocol{
+    uint16_t magic; // 魔数，固定值0x1234
+    uint8_t version; // 版本号，当前为1
+    uint8_t type; // 消息类型，1表示文本消息,
+    uint32_t len; // 后面数据的长度
+    char payload[]; // 可变长度的消息内容
+};
+#pragma pack()
 volatile sig_atomic_t stop = 0;
 void handle_sigint(int sig) {
     stop = 1; // 设置标志位
@@ -66,12 +75,38 @@ int main(){
 				epoll_ctl(epfd,EPOLL_CTL_ADD,cfd,&epe);
 			}
 			else{
-				char ch[1024];
+				unsigned char ch[1024];
 				int m=recv(events[i].data.fd,ch,1023,0);
 				if(m>0){
 					ch[m]='\0';
-					printf("127.0.0.1:8888\n\t%s\n",ch);
-					send(events[i].data.fd,"received\n",9,0);
+					//struct Myprotocol *msg=(struct Myprotocol *)ch;
+					struct Myprotocol tmp;
+					size_t len_Myprotocol=sizeof(struct Myprotocol);
+					if(m<len_Myprotocol){ //【重要修复】验证接收到的数据长度，确保至少包含协议头部
+						printf("Incomplete protocol header from client fd %d\n", events[i].data.fd);
+						continue;
+					}
+					memcpy(&tmp, ch, sizeof(struct Myprotocol)); //【重要修复】正确解析协议头部
+					if(ntohs(tmp.magic)!=0x1234){ //【重要修复】验证魔数，确保协议正确
+						printf("Invalid magic number from client fd %d\n", events[i].data.fd);
+						continue;
+					}
+					
+					size_t payload_len=ntohl(tmp.len); //【重要修复】正确解析消息内容长度——序列转换
+					if(payload_len>0 && payload_len<=1023-len_Myprotocol){ //【重要修复】验证消息内容长度，防止缓冲区溢出
+						//msg->payload=malloc(payload_len); //【重要修复】为消息内容分配内存
+						struct Myprotocol *msg=malloc(len_Myprotocol+payload_len); //【重要修复】为整个协议结构分配内存
+						memcpy(msg, ch , payload_len+len_Myprotocol); //【重要修复】正确解析协议头部和消息内容
+						msg->payload[payload_len]='\0'; // 确保消息内容以'\0'结尾
+						printf("127.0.0.1:8888\n\t%s\n", msg->payload);
+						free(msg); //【重要修复】释放为协议结构分配的内存
+						send(events[i].data.fd,"received\n",9,0);
+					} else {
+						printf("Invalid payload length from client fd %d\n", events[i].data.fd);
+						continue;
+					}
+					
+					
 				} else if (m == 0) {
                     // 【重要修复】客户端断开，清理资源
                     printf("Client fd %d closed connection.\n", events[i].data.fd);

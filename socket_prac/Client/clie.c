@@ -15,8 +15,8 @@
 struct Myprotocol{
     uint16_t magic; // 魔数，固定值0x1234
     uint8_t version; // 版本号，当前为1
-    uint32_t len; // 后面数据的长度
     uint8_t type; // 消息类型，1表示文本消息,
+    uint32_t len; // 后面数据的长度
     char payload[]; // 可变长度的消息内容
 };
 #pragma pack()
@@ -38,13 +38,14 @@ int main(){
     }
     char *text="fuck you\n";
     size_t len_text=strlen(text);
-    struct Myprotocol *msg=malloc(sizeof(struct Myprotocol)+len_text);
+    size_t len_Myprotocol=sizeof(struct Myprotocol);
+    struct Myprotocol *msg=malloc(len_Myprotocol+len_text);
     msg->magic=htons(0x1234);
     msg->version=0;
     msg->len=htonl(len_text);
     msg->type=1;
     memcpy(msg->payload,text,len_text);
-    send(cfd,msg,sizeof(struct Myprotocol)+len_text,0);
+    send(cfd,msg,len_Myprotocol+len_text,0);
     free(msg);
     char ch[100];
     int m=recv(cfd,ch,100,0);
