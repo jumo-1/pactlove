@@ -45,14 +45,19 @@ int main(){
     msg->len=htonl(len_text);
     msg->type=1;
     memcpy(msg->payload,text,len_text);
-    send(cfd,msg,len_Myprotocol+len_text,0);
-    free(msg);
     char ch[100];
-    int m=recv(cfd,ch,100,0);
-    if(m>0){
+    for(int i=0;i<5;i++){
+        send(cfd,msg,len_Myprotocol+len_text,0);
+        int m=recv(cfd,ch,100,0);
+        if(m>0){
         ch[m]='\0';
         printf("\n%s\n", ch);
 
+        }
     }
+    free(msg);
+    
+    
+    
     return 0;
 }

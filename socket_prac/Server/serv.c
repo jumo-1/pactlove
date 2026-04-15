@@ -11,6 +11,7 @@
 #include<arpa/inet.h>
 #include <sys/epoll.h>
 #include <errno.h>  
+#define BUF_SIZE 4096
 #pragma pack(1)
 struct Myprotocol{
     uint16_t magic; // 魔数，固定值0x1234
@@ -20,6 +21,12 @@ struct Myprotocol{
     char payload[]; // 可变长度的消息内容
 };
 #pragma pack()
+struct connection_item {
+	int fd; // 连接的文件描述符
+	unsigned char buffer[BUF_SIZE]; // 连接的缓冲区
+	size_t buffer_len; // 缓冲区中数据的长度
+	
+};
 volatile sig_atomic_t stop = 0;
 void handle_sigint(int sig) {
     stop = 1; // 设置标志位
@@ -49,8 +56,10 @@ int main(){
 	}
 	int epfd = epoll_create1(0);
 	struct epoll_event epe,events[10];
+	struct connection_item *item0=malloc(sizeof(struct connection_item)); //【重要修复】定义连接项结构体变量
+	item0->fd = lfd; //【重要修复】设置监听文件描述符
 	epe.events=EPOLLIN;
-	epe.data.fd=lfd;
+	epe.data.ptr = item0; //【重要修复】将事件数据指针设置为连接项
 	epoll_ctl(epfd,EPOLL_CTL_ADD,lfd,&epe);
 	if(listen(lfd,128)==-1){
 			perror("listen();");
@@ -68,51 +77,67 @@ int main(){
 			return 0;
 		}
 		for(int i=0;i<num;i++){
-			if(events[i].data.fd==lfd){
+			struct connection_item *item = (struct connection_item *)events[i].data.ptr; //void *指针需要强制转换为struct connection_item *类型
+			// 编译器无法自动推断类型，必须显式转换
+			if(item->fd==lfd){
 				struct sockaddr_in clie_addr;
 				int cfd=accept(lfd,(struct sockaddr *)&clie_addr,&len);
-				epe.data.fd=cfd; //【重要修复】正确设置事件数据为新连接的文件描述符
-				epoll_ctl(epfd,EPOLL_CTL_ADD,cfd,&epe);
+				//epe.data.fd=cfd; //【重要修复】正确设置事件数据为新连接的文件描述符
+				struct connection_item *item = malloc(sizeof(struct connection_item)); //【重要修复】为连接项分配内存
+				item->fd = cfd; //【重要修复】设置连接项的文件描述符
+				item->buffer_len = 0; //【重要修复】初始化连接项的缓冲区长度
+				memset(item->buffer, 0, BUF_SIZE); //【重要修复】清空缓冲区
+				struct epoll_event epe1;
+				epe1.data.ptr = item; //【重要修复】将事件数据指针设置为连接项
+				epe1.events = EPOLLIN;
+				//epe1.events = EPOLLIN | EPOLLET; //【重要修复】使用边缘触发模式，提高性能
+				epoll_ctl(epfd,EPOLL_CTL_ADD,cfd,&epe1); //【重要修复】将新连接添加到epoll监视列表
 			}
-			else{
-				unsigned char ch[1024];
-				int m=recv(events[i].data.fd,ch,1023,0);
-				if(m>0){
-					ch[m]='\0';
-					//struct Myprotocol *msg=(struct Myprotocol *)ch;
-					struct Myprotocol tmp;
-					size_t len_Myprotocol=sizeof(struct Myprotocol);
-					if(m<len_Myprotocol){ //【重要修复】验证接收到的数据长度，确保至少包含协议头部
-						printf("Incomplete protocol header from client fd %d\n", events[i].data.fd);
-						continue;
-					}
-					memcpy(&tmp, ch, sizeof(struct Myprotocol)); //【重要修复】正确解析协议头部
-					if(ntohs(tmp.magic)!=0x1234){ //【重要修复】验证魔数，确保协议正确
-						printf("Invalid magic number from client fd %d\n", events[i].data.fd);
-						continue;
-					}
-					
-					size_t payload_len=ntohl(tmp.len); //【重要修复】正确解析消息内容长度——序列转换
-					if(payload_len>0 && payload_len<=1023-len_Myprotocol){ //【重要修复】验证消息内容长度，防止缓冲区溢出
-						//msg->payload=malloc(payload_len); //【重要修复】为消息内容分配内存
-						struct Myprotocol *msg=malloc(len_Myprotocol+payload_len); //【重要修复】为整个协议结构分配内存
-						memcpy(msg, ch , payload_len+len_Myprotocol); //【重要修复】正确解析协议头部和消息内容
-						msg->payload[payload_len]='\0'; // 确保消息内容以'\0'结尾
+			else {
+				
+				int m = recv(item->fd, item->buffer + item->buffer_len,
+					BUF_SIZE - item->buffer_len, 0);
+				if (m > 0) {  //确保接收到的数据长度大于0，避免处理空数据
+					item->buffer_len += m;
+					size_t len_Myprotocol = sizeof(struct Myprotocol);
+					size_t processed = 0;
+					while (item->buffer_len - processed >= len_Myprotocol) {
+						struct Myprotocol tmp;
+						memcpy(&tmp, item->buffer + processed, len_Myprotocol);
+						if (ntohs(tmp.magic) != 0x1234) {
+							printf("Invalid magic number from client fd %d\n", item->fd);
+							break;
+						}
+						size_t payload_len = ntohl(tmp.len);
+						size_t msg_len = len_Myprotocol + payload_len;
+						if (payload_len == 0 || payload_len > BUF_SIZE - len_Myprotocol) {
+							printf("Invalid payload length from client fd %d\n", item->fd);
+							break;
+						}
+						if (item->buffer_len - processed < msg_len) {
+							break; // 等待更多数据到达
+						}
+						struct Myprotocol *msg = malloc(msg_len + 1);
+						memcpy(msg, item->buffer + processed, msg_len);
+						msg->payload[payload_len] = '\0';
 						printf("127.0.0.1:8888\n\t%s\n", msg->payload);
-						free(msg); //【重要修复】释放为协议结构分配的内存
-						send(events[i].data.fd,"received\n",9,0);
-					} else {
-						printf("Invalid payload length from client fd %d\n", events[i].data.fd);
-						continue;
+						free(msg);
+						send(item->fd, "received\n", 9, 0);
+						processed += msg_len;
 					}
-					
-					
+					if (processed > 0) {
+						memmove(item->buffer, item->buffer + processed,
+							item->buffer_len - processed);
+						item->buffer_len -= processed;
+					}
 				} else if (m == 0) {
-                    // 【重要修复】客户端断开，清理资源
-                    printf("Client fd %d closed connection.\n", events[i].data.fd);
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
-                    close(events[i].data.fd);
-                }
+					// 【重要修复】客户端断开，清理资源
+					printf("Client fd %d closed connection.\n", item->fd);
+					epoll_ctl(epfd, EPOLL_CTL_DEL, item->fd, NULL);
+					
+					close(item->fd);
+					free(item); //【重要修复】释放连接项的内存
+				}
 			}
 
 		}
@@ -121,7 +146,7 @@ int main(){
 	
 	}
 	
-	
+	free(item0); //【重要修复】释放监听项的内存
 	printf("Shutting down server...\n");
 	close(lfd);
 	return 0;
