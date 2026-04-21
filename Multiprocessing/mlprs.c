@@ -323,5 +323,9 @@ int main(){
     }
     shmctl(shmid, IPC_RMID, NULL); // 删除共享内存
     del_sem(semid); // 删除信号量
+    del_sem(semid2); // 删除信号量
+    del_sem(semid3); // 删除信号量
+     shmdt(shmaddr2); // 分离共享内存
+    shmctl(shmid2, IPC_RMID, NULL); // 删除共享内存
     return 0;
 }
