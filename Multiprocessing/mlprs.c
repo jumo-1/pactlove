@@ -7,7 +7,7 @@
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <string.h>
-#define NUM_CHILDREN 10
+#define NUM_CHILDREN 13
 struct My_shm{
     int data;
     char str[100];
@@ -24,15 +24,29 @@ int init_sem(int semid,int value){
     return semctl(semid, 0, SETVAL, sem_union);
  
 }
+//初始化多个信号量
+int init_sem2(int semid,int *value ,int n){
+    union semun {
+        int val;               // 用于 SETVAL
+        struct semid_ds *buf;  // 用于 IPC_STAT 和 IPC_SET
+        unsigned short *array; // 用于 GETALL 和 SETALL
+    } sem_union;
+    unsigned short values[3];
+    for(int i=0;i<n;i++){
+        values[i]=value[i];
+    }
+    sem_union.array=values;
+    return semctl(semid, 0, SETALL, sem_union);
+}
 // P操作
-int P(int semid){
-    struct sembuf sem_b={0,-1,SEM_UNDO}; // 对信号量进行P操作，SEM_UNDO表示如果进程异常退出，系统会自动恢复信号量的值
+int P(int semid,int sem_num){
+    struct sembuf sem_b={sem_num,-1,SEM_UNDO}; // 对信号量进行P操作，SEM_UNDO表示如果进程异常退出，系统会自动恢复信号量的值
     
     return semop(semid, &sem_b, 1);
 }
 // V操作
-int V(int semid){
-    struct sembuf sem_b={0,1,SEM_UNDO}; // 对信号量进行V操作，SEM_UNDO表示如果进程异常退出，系统会自动恢复信号量的值
+int V(int semid,int sem_num){
+    struct sembuf sem_b={sem_num,1,SEM_UNDO}; // 对信号量进行V操作，SEM_UNDO表示如果进程异常退出，系统会自动恢复信号量的值
     return semop(semid, &sem_b, 1);
 }
 // 删除信号量
@@ -76,9 +90,9 @@ int main(){
     }
     struct My_shm *const my_shm=(struct My_shm*)shmaddr; // 将共享内存地址转换为结构体指针
     my_shm->competition=0; // 初始化竞争变量
-    // 信号量的初始化
-    key_t k2=ftok("semfile", 65);
-    int semid=semget(k2, 1, 0666 | IPC_CREAT);
+    // 互斥信号量的初始化
+    //key_t k2=ftok("semfile", 65); //文件路径一定要存在，否则ftok会失败
+    int semid=semget(IPC_PRIVATE, 1, 0666 | IPC_CREAT);
     if(semid==-1){
         perror("semget error");
         exit(1);
@@ -87,6 +101,44 @@ int main(){
         perror("init_sem error");
         exit(1);
     };
+    // 同步信号量的初始化
+    //key_t k3=ftok("semfile2", 65);
+    int semid2=semget(IPC_PRIVATE, 3, 0666 | IPC_CREAT);
+    if(semid2==-1){
+        perror("semget error");
+        exit(1);
+    }
+    int sem_values[3]={1,0,0}; // 初始化三个信号量的值
+    if(init_sem2(semid2, sem_values, 3)==-1){
+        perror("init_sem2 error");
+        exit(1);
+    }
+    //
+    //key_t k4=ftok("file", 65);
+     int semid3=semget(IPC_PRIVATE, 1, 0666 | IPC_CREAT);
+    if(semid3==-1){
+        perror("semget error");
+        exit(1);
+    }
+     if(init_sem(semid3, 1)==-1){
+        perror("init_sem error");
+        exit(1);
+    };
+    //
+    //key_t k5=ftok("sharedmemfile2", 65);
+    int shmid2=shmget(IPC_PRIVATE, 1024, 0666 | IPC_CREAT);
+    if(shmid2==-1){
+        perror("shmget error");
+        exit(1);
+    }
+
+    void *shmaddr2=shmat(shmid2,NULL,0); // 将共享内存附加到进程地址空间
+    if(shmaddr2==(void*)-1){
+        perror("shmat error");
+        exit(1);
+    }
+    int *shared_num=(int*)shmaddr2; // 将共享内存地址转换为整数指针
+    *shared_num=0; // 初始化共享变量
     for(int i=0;i<NUM_CHILDREN;i++){
         pid[i]=fork();
         if(pid[i]<0){
@@ -147,36 +199,81 @@ int main(){
                 printf("子进程%d:%d向共享内存写入字符串：%s\n",getpid(),i,my_shm->str);
             }
             if(i==7){
-                P(semid); // P操作，进入临界区
+                P(semid,0); // P操作，进入临界区
                 for(int j=0;j<1000000;j++){
                     
                     my_shm->competition++; // 竞争变量自增
                     
                 }
-                V(semid); // V操作，离开临界区
+                V(semid,0); // V操作，离开临界区
             }
             if(i==8){
                 
-                P(semid); // P操作，进入临界区
+                P(semid,0); // P操作，进入临界区
                 for(int j=0;j<1000000;j++){
                     
                     my_shm->competition++; // 竞争变量自增
                     
                 }
-                V(semid); // V操作，离开临界区
+                V(semid,0); // V操作，离开临界区
                 
             }
             if(i==9){
                 
-                P(semid); // P操作，进入临界区
+                P(semid,0); // P操作，进入临界区
                 for(int j=0;j<1000000;j++){
                     
                     my_shm->competition++; // 竞争变量自增
                     
                 }
-                V(semid); // V操作，离开临界区
+                V(semid,0); // V操作，离开临界区
                 
             }
+            if(i==11){
+                while(1){
+                    P(semid2,0); // P操作，进入临界区
+                    // 检查是否该下班了
+                    if(*shared_num >= 10){
+                        V(semid2,1); // 💡 走之前，必须把钥匙塞给步骤2，叫醒他让他也下班！
+                        break;       // 跳出循环
+                    }
+                    printf("同步执行：步骤1,num:%d\n",*shared_num);
+                    P(semid3,0); // P操作，进入临界区，保护共享变量
+                    *shared_num=*shared_num+1; // 共享变量自增
+                    V(semid3,0); // V操作，离开临界区
+                    V(semid2,1); // V操作，通知步骤2可以执行
+                }
+            }
+            if(i==10){
+                while(1){
+                    P(semid2,1); // P操作，等待步骤1完成
+                    // 检查是否该下班了
+                    if(*shared_num >= 10){
+                        V(semid2,2); // 💡 走之前，必须把钥匙塞给步骤2，叫醒他让他也下班！
+                        break;       // 跳出循环
+                    }
+                    printf("同步执行：步骤2,num:%d\n",*shared_num);
+                    P(semid3,0); // P操作，进入临界区，保护共享变量
+                    *shared_num=*shared_num+1; // 共享变量自增
+                    V(semid3,0); // V操作，离开临界区
+                    V(semid2,2); // V操作，通知步骤3可以执行
+                }
+            }
+            if(i==12){
+                while(1){
+                    P(semid2,2); // P操作，等待步骤1完成
+                    if(*shared_num >= 10){
+                        V(semid2,0); // 💡 走之前，必须把钥匙塞给步骤2，叫醒他让他也下班！
+                        break;       // 跳出循环
+                    }
+                    printf("同步执行：步骤3,num:%d\n",*shared_num);
+                    P(semid3,0); // P操作，进入临界区，保护共享变量
+                    *shared_num=*shared_num+1; // 共享变量自增
+                    V(semid3,0); // V操作，离开临界区
+                    V(semid2,0); // V操作，通知步骤1可以执行
+                }
+            }
+            
             exit(0); // 子进程退出
         }else{
             continue; // 父进程继续创建下一个子进程
