@@ -1,9 +1,21 @@
+#define _GNU_SOURCE // 定义宏以使用GNU扩展功能 // 放在所有 #include 之前
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>   
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <sys/time.h>
+#include <time.h>
 #define BUFFER_SIZE 5
+#define LOG(fmt,...) do{ \
+    struct timeval _tv;\
+    gettimeofday(&_tv,NULL);\
+    struct tm _tm;\
+    localtime_r(&_tv.tv_sec,&_tm);\
+    fprintf(stderr,"[%02d:%02d:%02d.%03ld][TID:%ld]"fmt"\n",_tm.tm_hour,_tm.tm_min,_tm.tm_sec, (long)(_tv.tv_usec/1000),(long)syscall(SYS_gettid),##__VA_ARGS__);\
+    fflush(stderr);\
+}while(0)
 int shutdown_flag=0; // 定义一个标志变量，表示生产者是否已经完成生产
 struct  ThreadArgs{
     void* arg; // 存放主程序中需要传递给线程的参数
@@ -33,14 +45,22 @@ void *producer(void* arg){
         while((*(args->in)+1)%BUFFER_SIZE==*(args->out)&&(*(args->producer_count)<20)){ 
             pthread_cond_wait(args->cond_full,args->lock_ptr);
         }
+        if(*(args->producer_count)>=20){ // 生产者生产了20个产品后退出循环
+            pthread_cond_broadcast(args->cond_empty); // 唤醒等待消费者的条件变量
+            pthread_cond_broadcast(args->cond_full); // 唤醒等待生产者的条件变量
+            pthread_mutex_unlock(args->lock_ptr);
+            pthread_exit(NULL);
+        }
         
         // 生产者生产一个产品
         buffer[*(args->in)]=rand()%100; // 生产一个随机数作为产品
-        printf("Produced %d: %d\n", args->thread_id, buffer[*(args->in)]);
+        LOG("Produced %d: %d", args->thread_id, buffer[*(args->in)]);
         *(args->in)=(*(args->in)+1)%BUFFER_SIZE; // 更新输入位置
         (*args->producer_count)++; // 增加生产者生产的产品数量
         args->count++; // 增加线程生产的产品数量
-        pthread_cond_signal(args->cond_empty); // 唤醒等待消费者的条件变量
+        if(*(args->in)!=*(args->out)){ // 如果缓冲区不空了，唤醒等待消费者的条件变量
+            pthread_cond_signal(args->cond_empty); // 唤醒等待消费者的条件变量
+        }
         pthread_mutex_unlock(args->lock_ptr);
     }
     return NULL;
@@ -51,22 +71,31 @@ void *consumer(void* arg){
     int *buffer=(int*)args->arg;
     while(1){
         pthread_mutex_lock(args->lock_ptr);
-        // 如果缓冲区空了，等待生产者生产
-        while(*(args->in)==*(args->out)){
-            if(shutdown_flag==1){ // 消费者消费了20个产品后退出循环
+        if(shutdown_flag==1&&*(args->in)==*(args->out)){ // 消费者消费了20个产品后退出循环
                 
                 pthread_mutex_unlock(args->lock_ptr);
                 pthread_exit(NULL);
             }
+        // 如果缓冲区空了，等待生产者生产
+        while(*(args->in)==*(args->out)&&shutdown_flag!=1){
+            
             pthread_cond_wait(args->cond_empty,args->lock_ptr);
         }
+        if(shutdown_flag==1&&*(args->in)==*(args->out)){ // 消费者消费了20个产品后退出循环
+                
+                pthread_mutex_unlock(args->lock_ptr);
+                pthread_exit(NULL);
+            }
         
-        printf("Consumed %d: %d\n", args->thread_id, buffer[*(args->out)]); // 消费一个产品
+        LOG("Consumed %d: %d", args->thread_id, buffer[*(args->out)]); // 消费一个产品
         *(args->out)=(*(args->out)+1)%BUFFER_SIZE; // 更新输出位置
         (*args->consumer_count)++; // 增加消费者消费的产品数量
         args->count++; // 增加线程消费的产品数量
-        pthread_cond_signal(args->cond_full); // 唤醒等待生产者的条件变量
+        if((*(args->in)+1)%BUFFER_SIZE!=*(args->out)){ // 如果缓冲区不满了，唤醒等待生产者的条件变量}
+            pthread_cond_signal(args->cond_full); // 唤醒等待生产者的条件变量
+        }
         pthread_mutex_unlock(args->lock_ptr);
+        usleep(100000); // 模拟消费者消费产品的时间，增加程序的可观察性
     }
     return NULL;
 }
